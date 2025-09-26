@@ -1,16 +1,5 @@
-add_executable(
-    vtsh
-    main.c
-)
+add_executable(vtsh main.c)
+target_include_directories(vtsh PUBLIC .)
+target_link_libraries(vtsh PRIVATE libvtsh)
 
-target_include_directories(
-    vtsh
-    PUBLIC
-    .
-)
-
-target_link_libraries(
-    vtsh
-    PRIVATE
-    libvtsh
-)
+add_executable(proc_clone proc_clone.c)
