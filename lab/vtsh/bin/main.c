@@ -13,6 +13,7 @@
 #include <unistd.h>
 #define _POSIX_C_SOURCE 200809L
 #include <time.h>
+#include <ctype.h>
 
 typedef struct Redirection {
   const char* in_path;
@@ -165,34 +166,99 @@ static void token_free(Token* t) {
   t->text = NULL;
 }
 
+typedef enum State {
+  S_START,      // начало
+  S_WORD,       // слово
+  S_LT,         // встретили <
+  S_GT,         // встретили >
+  S_LT_PATH,    // читаем путь после <
+  S_GT_PATH,    // читаем путь после >
+  S_DONE,       // закончили токен
+  S_ERR         // ошибка
+} State;
+
 static Token lexer_next(Lexer* lx) {
-  while (lx->i < lx->n && is_space(lx->s[lx->i]))
-    lx->i++;
-  if (lx->i >= lx->n)
-    return make_token(T_EOF, NULL);
-
-  char c = lx->s[lx->i];
-  if (c == '<' || c == '>') {
-    char sym = c;
-    lx->i++;
-    if (lx->i < lx->n && lx->s[lx->i] == '>') {
-      return make_token(T_ERR, strdup(sym == '>' ? ">>" : ">>"));
-    }
-
+    State st = S_START;
     size_t start = lx->i;
-    while (lx->i < lx->n && !is_space(lx->s[lx->i]))
-      lx->i++;
-    if (lx->i > start) {
-      char* path = dup_range(lx->s, start, lx->i);
-      return make_token(sym == '<' ? T_LT_PATH : T_GT_PATH, path);
+
+    while (lx->i < lx->n) {
+        char c = lx->s[lx->i];
+
+        switch (st) {
+        case S_START:
+            if (isspace(c)) { lx->i++; start++; } 
+            else if (c == '<') { st = S_LT; lx->i++; }
+            else if (c == '>') { st = S_GT; lx->i++; }
+            else { st = S_WORD; lx->i++; }
+            break;
+
+        case S_WORD:
+            if (isspace(c)) {
+                char* text = dup_range(lx->s, start, lx->i);
+                return make_token(T_WORD, text);
+            } else {
+                lx->i++;
+            }
+            break;
+
+        case S_LT:
+            if (lx->i < lx->n && !isspace(c)) {
+                st = S_LT_PATH;
+                
+            } else {
+                return make_token(T_LT, NULL);
+            }
+            break;
+
+        case S_GT:
+            if (c == '>') {
+                return make_token(T_ERR, strdup(">>"));
+            }
+            if (lx->i < lx->n && !isspace(c)) {
+                st = S_GT_PATH;
+            } else {
+                return make_token(T_GT, NULL);
+            }
+            break;
+
+        case S_LT_PATH:
+            if (isspace(c)) {
+                char* path = dup_range(lx->s, start+1, lx->i);
+                return make_token(T_LT_PATH, path);
+            }
+            lx->i++;
+            break;
+
+        case S_GT_PATH:
+            if (isspace(c)) {
+                char* path = dup_range(lx->s, start+1, lx->i);
+                return make_token(T_GT_PATH, path);
+            }
+            lx->i++;
+            break;
+
+        default:
+            return make_token(T_ERR, NULL);
+        }
     }
-    return make_token(sym == '<' ? T_LT : T_GT, NULL);
-  }
-  size_t start = lx->i;
-  while (lx->i < lx->n && !is_space(lx->s[lx->i]))
-    lx->i++;
-  char* w = dup_range(lx->s, start, lx->i);
-  return make_token(T_WORD, w);
+
+    // если закончили строку
+    if (st == S_WORD) {
+        char* text = dup_range(lx->s, start, lx->i);
+        return make_token(T_WORD, text);
+    }
+    if (st == S_LT) return make_token(T_LT, NULL);
+    if (st == S_GT) return make_token(T_GT, NULL);
+    if (st == S_LT_PATH) {
+        char* path = dup_range(lx->s, start+1, lx->i);
+        return make_token(T_LT_PATH, path);
+    }
+    if (st == S_GT_PATH) {
+        char* path = dup_range(lx->s, start+1, lx->i);
+        return make_token(T_GT_PATH, path);
+    }
+
+    return make_token(T_EOF, NULL);
 }
 
 static void command_init(Command* cmd) {
@@ -499,12 +565,14 @@ static int run_command(
   pc_argv[1] = "--";
   for (size_t i = 0; i < (size_t)argc_cmd; ++i)
     pc_argv[2 + i] = argv[i];
-
+  fprintf(stderr, "[DEBUG] parent process, pid=%d\n", getpid());
   char proc_path[PATH_MAX];
   build_proc_clone_path(proc_path, sizeof(proc_path));
   pid_t p = fork();
+  
   if (p == 0) {
-    // child wrapper: подключаем редиректы и stdin pipe
+    // child wrapper: подключаем редиректы и stdin pipe 
+    fprintf(stderr, "[DEBUG] child process, pid=%d\n", getpid());
     if (rd->has_in) {
       dup2(fds.in_fd, STDIN_FILENO);
     } else if (fds.feed_stdin) {
@@ -520,7 +588,7 @@ static int run_command(
     close_if_open(fds.in_fd);
     close_if_open(fds.out_fd);
     close_pair(fds.pin);
-    // Тихий режим, чтобы не засорять stdout
+    
     setenv("PROC_CLONE_QUIET", "1", 1);
     execvp(proc_path, pc_argv);
     _exit(1);

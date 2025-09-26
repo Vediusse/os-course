@@ -23,10 +23,12 @@ static int child_main(void* arg) {
   ChildContext* context = (ChildContext*)arg;
   if (context->should_exec) {
     execvp(context->argv_for_exec[0], context->argv_for_exec);
+    
     perror("execvp");
     return 127;
   }
   const char* quiet_env = getenv("PROC_CLONE_QUIET");
+  
   bool quiet = (quiet_env && strcmp(quiet_env, "0") != 0);
   if (!quiet) {
     printf("[child] pid=%ld ppid=%ld\n", (long)getpid(), (long)getppid());
@@ -85,6 +87,7 @@ int main(int argc, char** argv) {
   const int clone_flags = SIGCHLD;
   struct timespec t_start = {0}, t_end = {0};
   clock_gettime(CLOCK_MONOTONIC, &t_start);
+  
 
   pid_t child_pid = clone(child_main, child_stack_top, clone_flags, &context);
   if (child_pid == -1) {
