@@ -1,4 +1,3 @@
-// Минимальный shell, совместимый с тестами из test/*.py
 #define _GNU_SOURCE
 #include <errno.h>
 #include <fcntl.h>
@@ -63,6 +62,19 @@ typedef struct Command {
   size_t cap;
   Redirection rd;
 } Command;
+
+
+typedef enum State {
+  S_START,      // начало
+  S_WORD,       // слово
+  S_LT,         // встретили <
+  S_GT,         // встретили >
+  S_LT_PATH,    // читаем путь после <
+  S_GT_PATH,    // читаем путь после >
+  S_DONE,       // закончили токен
+  S_ERR         // ошибка
+} State;
+
 
 static char* dup_range(const char* s, size_t a, size_t b) {
   size_t n = (b > a) ? b - a : 0;
@@ -166,16 +178,6 @@ static void token_free(Token* t) {
   t->text = NULL;
 }
 
-typedef enum State {
-  S_START,      // начало
-  S_WORD,       // слово
-  S_LT,         // встретили <
-  S_GT,         // встретили >
-  S_LT_PATH,    // читаем путь после <
-  S_GT_PATH,    // читаем путь после >
-  S_DONE,       // закончили токен
-  S_ERR         // ошибка
-} State;
 
 static Token lexer_next(Lexer* lx) {
     State st = S_START;
@@ -242,7 +244,7 @@ static Token lexer_next(Lexer* lx) {
         }
     }
 
-    // если закончили строку
+    
     if (st == S_WORD) {
         char* text = dup_range(lx->s, start, lx->i);
         return make_token(T_WORD, text);
@@ -536,7 +538,7 @@ static int run_command(
     return 0;
 
   // Специальный no-op для "./shell" — тест nested_shells
-  if (strcmp(argv[0], "./shell") == 0)
+  if (strcmp(argv[0], "./vtsh") == 0)
     return 0;
 
   // Всегда используем proc_clone для запуска внешней команды
